@@ -1,6 +1,6 @@
-<center>
-<img src="./crust_of_rust.png" style="width:200px;height:200px">
-</center>
+<div align="center">
+<img src="./crust_of_rust.png" style="width:200px;height:200px;" >
+</div>
 
 
 
