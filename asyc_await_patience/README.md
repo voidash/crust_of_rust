@@ -1,5 +1,8 @@
-# Async Await Notes
+### To look for 
+- `epoll`
+- `mio`
 
+# Async Await Notes
 
 
 ## `async`
@@ -87,5 +90,44 @@ Function 4 -> calls yeild
 ```
 
 
+## Async
+
+It can be thought as a big state machine
+
+```rust
+let network = read_from_network();
+let terminal = read_from_terminal();
+
+select! {
+stream <- network.await => {
+//do something on stream
+
+}
+line <- terminal.await => {
+//do something with line
+}
+
+}
+
+
+## Executors
+
+Tokio is executor. The job of a primitive executor would be to poll Futures in a loop.
+
+Here Future means a something that doesn't have value right now but will once the task is complete.  Tokio works on operating system 
+
+![polling](assets/polling.png)
+
+Polling basically allows a instance to visit multiple items in a queue to check whether they are available to work upon or not. 
+
+
+Future is a monad. A monad has two operators, one to wrap a value in monad type. Another to compose together function that output values of a monad types. In Future,operator to wrap a value in monad type is `Future<Success, Fail>` and operator to compose function would be async function that does some task and if it is successful returns success.
+```
+
+
+## Blogs
+[https://blog.stephencleary.com/2013/11/there-is-no-thread.html](https://blog.stephencleary.com/2013/11/there-is-no-thread.html)
+
+ 
 
 
