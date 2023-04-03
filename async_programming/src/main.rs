@@ -1,70 +1,100 @@
-use std::{sync::mpsc, thread, io::Write};
-use rand::Rng;
+mod game;
 
-/// simple game that simulates a simple game where players take turns guessing a randomly generated
-/// number
-fn mpsc_guess_the_number_game() {
-    const RECEIVED_CORRECT_GUESS: &str = "guessed";
-    const RECEIVED_INCORRECT_GUESS: &str = "wrong_guess";
+use futures::{
+    future::{BoxFuture,FutureExt},
+    task::{waker_ref, ArcWake}
+};
+use std::{
+    future::Future,
+    sync::mpsc::{sync_channel, Receiver, SyncSender},
+    sync::{Arc, Mutex},
+    task::Context,
+    time::Duration,
+};
+use timer_future::TimerFuture;
+/// Task executor that receives tasks off of a channel and runs them.
+struct Executor {
+    ready_queue: Receiver<Arc<Task>>,
+}
 
-    let (tx,rx) = mpsc::channel();
-    let (tx1,rx2) = mpsc::channel();
+/// `Spawner` spawns new futures onto the task channel.
+#[derive(Clone)]
+struct Spawner {
+    task_sender: SyncSender<Arc<Task>>,
+}
 
-    let game_loop = thread::spawn(move || {
-        let random_number= rand::thread_rng().gen_range(0..100);
-        println!("random number is {}", random_number);
-        loop {
-        match rx.recv(){
-            Ok(guess) => {
-                if guess == random_number {
-                    println!(" found the number {}", guess);
-                    tx1.send(RECEIVED_CORRECT_GUESS).unwrap();
-                    break;
-                }else {
-                    println!("wrong guess, guess it again");
-                    tx1.send(RECEIVED_INCORRECT_GUESS).unwrap();
+/// A future that can reschedule itself to be polled by an `Executor`.
+struct Task {
+    future: Mutex<Option<BoxFuture<'static, ()>>>,
+
+    /// Handle to place the task itself back onto the task queue.
+    task_sender: SyncSender<Arc<Task>>,
+}
+
+fn new_executor_and_spawner() -> (Executor, Spawner) {
+    const MAX_QUEUED_TASKS: usize = 10_000;
+    let (task_sender, ready_queue) = sync_channel(MAX_QUEUED_TASKS);
+    (Executor{ready_queue}, Spawner{task_sender})
+}
+
+impl Spawner {
+    fn spawn(&self, future: impl Future<Output = ()> + 'static + Send) {
+        let future = future.boxed();
+        let task = Arc::new(Task {
+            future: Mutex::new(Some(future)),
+            task_sender:self.task_sender.clone() 
+        });
+        self.task_sender.send(task).expect("too many task queued");
+    }
+}
+
+impl ArcWake for Task {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        let cloned = arc_self.clone();
+        arc_self
+        .task_sender
+        .send(cloned)
+        .expect("Too many task queued");
+    }
+}
+
+impl Executor {
+    fn run(&self) {
+        while let Ok(task) = self.ready_queue.recv() {
+            let mut future_slot = task.future.lock().unwrap();
+            if let Some(mut future) = future_slot.take() {
+                let waker = waker_ref(&task);
+                let context = &mut Context::from_waker(&waker);
+                if future.as_mut().poll(context).is_pending() {
+                    *future_slot = Some(future);
                 }
-            }
-            Err(err) => {println!("error {} ", err);}
-        }
-        }
-    });
 
-    let player = thread::spawn(move || {
-        loop {
-            let mut guess_string = String::new();
-            std::io::stdout().flush().unwrap();
-            std::io::stdin().read_line(&mut guess_string).unwrap();
-            
-            let guess = match guess_string.trim().parse::<i32>() {
-                Ok(num) => num,
-                Err(_) => {
-                    println!("invalid input, try again");
-                    continue;
-                }
-            };
-            match tx.send(guess) {
-                Ok(_) => {println!("sent");},
-                Err(e) => {println!("{}",e);}
             }
 
-            if let Ok(recv_string) = rx2.recv() {
-                if recv_string == RECEIVED_CORRECT_GUESS {
-                    println!("received");
-                    break;
-                }else {
-                    println!("incorrect guess received from the channel");
-                }
-            }
         }
-    });
-
-    game_loop.join().unwrap();
-    player.join().unwrap();
-
+    }
 }
 
 fn main() {
-    mpsc_guess_the_number_game();
+ let (executor, spawner) = new_executor_and_spawner();
+
+
+ spawner.spawn(async {
+    println!("la");
+    TimerFuture::new(Duration::new(2,0)).await;
+    println!("la");
+ });
+
+ spawner.spawn(async {
+    println!("this is test");
+    TimerFuture::new(Duration::new(4,0)).await;
+    println!("done!");
+ });
+
+ drop(spawner);
+ for i in 1..100 {
+    println!("{}",i);
+ }
+ executor.run();
+ println!("this is stet");
 }
-// 
